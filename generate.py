@@ -12,6 +12,9 @@
 번호 체계가 서로 독립적이라(예: synergy-shorts의 05_octolock이 shopping-shorts의
 05_bathroomtable과 06_Cabinet 사이에 끼는 식), 숫자만으로는 실제 생성 순서를 더 이상
 보장할 수 없기 때문.
+
+synergy-shorts web/getitem_links.py의 "상품 리스트 업데이트" 버튼이 실제로 커밋/푸시까지
+하는지 2026-11-13에 종단간 확인했다 — 이 문장이 바로 그 테스트용 변경이다.
 """
 import datetime
 import re
