@@ -1,56 +1,81 @@
 #!/usr/bin/env python3
 """오늘의겟템 파이프라인 기록(data/records/*.md)을 읽어 index.html을 다시 생성한다.
 새 제품이 추가되면 이 스크립트만 다시 실행하면 된다: python3 generate.py
+
+2026-11-13 — SOURCE_ROOT가 shopping-shorts 하나로 고정돼 있어서, synergy-shorts(새
+파이프라인, 같은 "오늘의겟템" 채널 제품을 만드는 두 번째 프로젝트)의 제품은 처음부터
+이 페이지에 반영될 방법이 없었다(생성 스크립트가 그 폴더를 아예 모름). 두 프로젝트 다
+읽도록 SOURCE_ROOTS 리스트로 바꿨다. 두 프로젝트의 레코드 파일명(id)이 전부 달라서
+(실측 확인: 겹치는 stem 없음) 썸네일 복사 시 덮어쓰기 충돌은 없다.
+
+정렬 기준도 "파일명 앞 숫자"에서 "레코드의 저장일시"로 바꿨다 — 두 프로젝트를 합치면
+번호 체계가 서로 독립적이라(예: synergy-shorts의 05_octolock이 shopping-shorts의
+05_bathroomtable과 06_Cabinet 사이에 끼는 식), 숫자만으로는 실제 생성 순서를 더 이상
+보장할 수 없기 때문.
 """
+import datetime
 import re
 import shutil
 from pathlib import Path
 
-SOURCE_ROOT = Path("/Users/jooseok/ClaudeCode/Study/shopping-shorts")
-RECORDS_DIR = SOURCE_ROOT / "data/records"
-THUMBS_SRC_DIR = SOURCE_ROOT / "output"
+SOURCE_ROOTS = [
+    Path("/Users/jooseok/ClaudeCode/Study/shopping-shorts"),
+    Path("/Users/jooseok/ClaudeCode/Study/synergy-shorts"),
+]
 
 SITE_ROOT = Path(__file__).resolve().parent
 THUMBS_DST_DIR = SITE_ROOT / "assets/thumbs"
-
-# 낮은 번호일수록 먼저 만든 영상이라, 역순(최신 먼저)으로 노출한다.
-def sort_key(path: Path) -> tuple:
-    m = re.match(r"(\d+)", path.stem)
-    return (int(m.group(1)) if m else 0, path.stem)
 
 
 def parse_record(path: Path):
     text = path.read_text(encoding="utf-8")
     title_m = re.search(r"^- 제목:[ \t]*(.+)$", text, re.MULTILINE)
     link_m = re.search(r"^- 쿠팡 링크:[ \t]*(\S+)[ \t]*$", text, re.MULTILINE)
+    ts_m = re.search(r"^- 저장일시:[ \t]*(.+)$", text, re.MULTILINE)
     if not title_m or not link_m:
         return None
+    saved_at = None
+    if ts_m:
+        try:
+            saved_at = datetime.datetime.strptime(ts_m.group(1).strip(), "%Y-%m-%d %H:%M")
+        except ValueError:
+            pass
     return {
         "id": path.stem,
         "title": title_m.group(1).strip(),
         "link": link_m.group(1).strip(),
+        "saved_at": saved_at,
     }
 
 
 def main():
     THUMBS_DST_DIR.mkdir(parents=True, exist_ok=True)
-    records = sorted(RECORDS_DIR.glob("*.md"), key=sort_key, reverse=True)
 
-    items = []
-    for path in records:
-        item = parse_record(path)
-        if item is None:
-            print(f"skip (링크 없음): {path.name}")
-            continue
+    parsed = []
+    for source_root in SOURCE_ROOTS:
+        records_dir = source_root / "data/records"
+        thumbs_src_dir = source_root / "output"
+        for path in sorted(records_dir.glob("*.md")):
+            item = parse_record(path)
+            if item is None:
+                print(f"skip (링크 없음): {path.name}")
+                continue
 
-        thumb_src = THUMBS_SRC_DIR / f"{item['id']}_thumbnail.png"
-        if not thumb_src.exists():
-            print(f"skip (썸네일 없음): {path.name}")
-            continue
-        thumb_name = f"{item['id']}.png"
-        shutil.copyfile(thumb_src, THUMBS_DST_DIR / thumb_name)
-        item["thumb"] = f"assets/thumbs/{thumb_name}"
-        items.append(item)
+            thumb_src = thumbs_src_dir / f"{item['id']}_thumbnail.png"
+            if not thumb_src.exists():
+                print(f"skip (썸네일 없음): {path.name}")
+                continue
+            thumb_name = f"{item['id']}.png"
+            shutil.copyfile(thumb_src, THUMBS_DST_DIR / thumb_name)
+            item["thumb"] = f"assets/thumbs/{thumb_name}"
+            parsed.append(item)
+
+    # 저장일시가 있으면 최신순, 없으면(예전 레코드) 맨 뒤로 보낸다.
+    items = sorted(
+        parsed,
+        key=lambda it: it["saved_at"] or datetime.datetime.min,
+        reverse=True,
+    )
 
     cards = "\n".join(
         f'''      <a class="card" href="{it['link']}" target="_blank" rel="noopener noreferrer sponsored">
